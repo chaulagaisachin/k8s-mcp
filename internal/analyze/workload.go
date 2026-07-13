@@ -16,32 +16,69 @@ type workload struct {
 		} `json:"selector"`
 	} `json:"spec"`
 	Status struct {
+		// Deployment / StatefulSet
 		Replicas          int         `json:"replicas"`
 		ReadyReplicas     int         `json:"readyReplicas"`
 		AvailableReplicas int         `json:"availableReplicas"`
 		UpdatedReplicas   int         `json:"updatedReplicas"`
 		Conditions        []condition `json:"conditions"`
+		// DaemonSet
+		DesiredNumberScheduled int `json:"desiredNumberScheduled"`
+		NumberReady            int `json:"numberReady"`
+		NumberAvailable        int `json:"numberAvailable"`
+		UpdatedNumberScheduled int `json:"updatedNumberScheduled"`
+		NumberMisscheduled     int `json:"numberMisscheduled"`
 	} `json:"status"`
 }
 
-// Deployment analyzes a deployment/statefulset/daemonset. It returns the report
-// and the label selector (k=v,...) for drilling into the workload's pods.
-func Deployment(raw []byte) (Report, string, error) {
+// isDaemonSet reports whether the kind (and its aliases) is a DaemonSet.
+func isDaemonSet(kind string) bool {
+	switch strings.ToLower(kind) {
+	case "daemonset", "daemonsets", "ds":
+		return true
+	}
+	return false
+}
+
+// Workload analyzes a deployment/statefulset/daemonset. It is kind-aware because
+// DaemonSets expose entirely different status fields (numberReady/desiredNumberScheduled)
+// and have no spec.replicas. It returns the report and the pod label selector.
+func Workload(raw []byte, kind string) (Report, string, error) {
 	var w workload
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return Report{}, "", err
 	}
 	r := Report{Name: w.Metadata.Name, Signals: map[string]string{}}
 
-	desired := 1
-	if w.Spec.Replicas != nil {
-		desired = *w.Spec.Replicas
+	var desired, ready, available, updated int
+	if isDaemonSet(kind) {
+		desired = w.Status.DesiredNumberScheduled
+		ready = w.Status.NumberReady
+		available = w.Status.NumberAvailable
+		updated = w.Status.UpdatedNumberScheduled
+		if w.Status.NumberMisscheduled > 0 {
+			r.Findings = append(r.Findings, Finding{
+				Severity: Warning,
+				Problem:  fmt.Sprintf("%d pods are misscheduled", w.Status.NumberMisscheduled),
+				Evidence: fmt.Sprintf("status.numberMisscheduled=%d", w.Status.NumberMisscheduled),
+			})
+		}
+	} else {
+		desired = 1
+		if w.Spec.Replicas != nil {
+			desired = *w.Spec.Replicas
+		}
+		ready = w.Status.ReadyReplicas
+		available = w.Status.AvailableReplicas
+		updated = w.Status.UpdatedReplicas
 	}
-	r.Signals["desired"] = fmt.Sprintf("%d", desired)
-	r.Signals["available"] = fmt.Sprintf("%d", w.Status.AvailableReplicas)
-	r.Signals["ready"] = fmt.Sprintf("%d", w.Status.ReadyReplicas)
-	r.Signals["updated"] = fmt.Sprintf("%d", w.Status.UpdatedReplicas)
 
+	r.Signals["desired"] = fmt.Sprintf("%d", desired)
+	r.Signals["available"] = fmt.Sprintf("%d", available)
+	r.Signals["ready"] = fmt.Sprintf("%d", ready)
+	r.Signals["updated"] = fmt.Sprintf("%d", updated)
+
+	// Conditions exist only on Deployments; the loop is a no-op for STS/DS.
 	for _, c := range w.Status.Conditions {
 		if c.Type == "Progressing" && c.Reason == "ProgressDeadlineExceeded" {
 			r.Findings = append(r.Findings, Finding{
@@ -53,17 +90,21 @@ func Deployment(raw []byte) (Report, string, error) {
 		}
 		if c.Type == "Available" && c.Status == "False" {
 			r.Findings = append(r.Findings, Finding{
-				Severity: Warning, Problem: "deployment is not Available",
+				Severity: Warning, Problem: "workload is not Available",
 				Cause: c.Message, Evidence: "condition Available status=False",
 			})
 		}
 	}
 
-	if w.Status.AvailableReplicas < desired {
+	if available < desired {
+		unit := "replicas"
+		if isDaemonSet(kind) {
+			unit = "pods scheduled"
+		}
 		r.Findings = append(r.Findings, Finding{
 			Severity: Warning,
-			Problem:  fmt.Sprintf("only %d/%d replicas available", w.Status.AvailableReplicas, desired),
-			Evidence: fmt.Sprintf("status.availableReplicas=%d spec.replicas=%d", w.Status.AvailableReplicas, desired),
+			Problem:  fmt.Sprintf("only %d/%d %s available", available, desired, unit),
+			Evidence: fmt.Sprintf("available=%d desired=%d", available, desired),
 		})
 	}
 

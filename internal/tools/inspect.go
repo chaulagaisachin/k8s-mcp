@@ -47,14 +47,14 @@ type ClusterInfoInput struct {
 }
 
 func registerInspect(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "list_namespaces",
 		Description: "List all namespaces in the cluster.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListNamespacesInput) (*mcp.CallToolResult, Result, error) {
 		return d.run(ctx, in.Context, "get", "namespaces", "-o", "wide")
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "list_resources",
 		Description: "List resources of a given type. Supports namespace, --all-namespaces, label selector, and output format (wide|json|yaml|name).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListResourcesInput) (*mcp.CallToolResult, Result, error) {
@@ -77,7 +77,7 @@ func registerInspect(s *mcp.Server, d *Deps) {
 		return d.runMaybeSecret(ctx, in.Context, in.Type, format, args...)
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "describe_resource",
 		Description: "Describe a resource (human-readable detail including events). Secret values are shown only as byte counts.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in DescribeResourceInput) (*mcp.CallToolResult, Result, error) {
@@ -95,7 +95,7 @@ func registerInspect(s *mcp.Server, d *Deps) {
 		return d.run(ctx, in.Context, args...)
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "get_resource",
 		Description: "Get a single resource's manifest as yaml (default) or json. Secret .data/.stringData values are redacted unless K8S_MCP_ALLOW_SECRETS is set.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetResourceInput) (*mcp.CallToolResult, Result, error) {
@@ -118,14 +118,14 @@ func registerInspect(s *mcp.Server, d *Deps) {
 		return d.runMaybeSecret(ctx, in.Context, in.Type, format, args...)
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "api_resources",
 		Description: "List the resource types (kinds) available in the cluster, including CRDs.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in APIResourcesInput) (*mcp.CallToolResult, Result, error) {
 		return d.run(ctx, in.Context, "api-resources", "-o", "wide")
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "cluster_info",
 		Description: "Show client/server version and cluster endpoints (a quick reachability and version check).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ClusterInfoInput) (*mcp.CallToolResult, Result, error) {

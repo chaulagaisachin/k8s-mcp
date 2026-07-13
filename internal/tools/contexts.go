@@ -32,7 +32,7 @@ type SetContextOutput struct {
 }
 
 func registerContexts(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "list_contexts",
 		Description: "List the kubeconfig contexts and the effective current context.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, ContextsOutput, error) {
@@ -51,7 +51,7 @@ func registerContexts(s *mcp.Server, d *Deps) {
 		}, nil
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "get_current_context",
 		Description: "Show the context currently in effect and where it came from.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, CurrentContextOutput, error) {
@@ -62,7 +62,7 @@ func registerContexts(s *mcp.Server, d *Deps) {
 		return nil, CurrentContextOutput{Context: current, Source: source}, nil
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "set_context",
 		Description: "Set the default context for this session (in memory only; does not modify the kubeconfig).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SetContextInput) (*mcp.CallToolResult, SetContextOutput, error) {

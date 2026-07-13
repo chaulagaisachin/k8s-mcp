@@ -22,7 +22,7 @@ type GetLogsInput struct {
 }
 
 func registerLogs(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "get_logs",
 		Description: "Get container logs for a pod. Output is capped; use tail/since to narrow it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetLogsInput) (*mcp.CallToolResult, Result, error) {

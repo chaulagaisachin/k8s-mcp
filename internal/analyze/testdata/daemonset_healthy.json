@@ -1,0 +1,12 @@
+{
+  "metadata": {"name": "canal", "namespace": "kube-system"},
+  "spec": {"selector": {"matchLabels": {"k8s-app": "canal"}}},
+  "status": {
+    "desiredNumberScheduled": 6,
+    "currentNumberScheduled": 6,
+    "numberReady": 6,
+    "numberAvailable": 6,
+    "updatedNumberScheduled": 6,
+    "numberMisscheduled": 0
+  }
+}

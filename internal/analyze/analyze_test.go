@@ -132,8 +132,8 @@ func TestPod_SortedBySeverity(t *testing.T) {
 	}
 }
 
-func TestDeployment_Stuck(t *testing.T) {
-	r, selector, err := Deployment(load(t, "deployment_stuck.json"))
+func TestWorkload_Deployment_Stuck(t *testing.T) {
+	r, selector, err := Workload(load(t, "deployment_stuck.json"), "deployment")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +145,51 @@ func TestDeployment_Stuck(t *testing.T) {
 	}
 	if selector != "app=web,tier=frontend" {
 		t.Fatalf("bad selector: %q", selector)
+	}
+}
+
+func TestWorkload_DaemonSet_Degraded(t *testing.T) {
+	r, selector, err := Workload(load(t, "daemonset_degraded.json"), "daemonset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Healthy {
+		t.Fatal("expected unhealthy daemonset")
+	}
+	f := findingBy(r, "pods scheduled")
+	if f == nil {
+		t.Fatalf("expected daemonset availability finding (pods scheduled), got %+v", r.Findings)
+	}
+	if r.Signals["desired"] != "6" || r.Signals["available"] != "4" {
+		t.Fatalf("daemonset signals wrong: %+v", r.Signals)
+	}
+	if selector != "k8s-app=canal" {
+		t.Fatalf("bad selector: %q", selector)
+	}
+}
+
+func TestWorkload_DaemonSet_Healthy(t *testing.T) {
+	// A DaemonSet with all pods ready must NOT be flagged (regression: the old
+	// deployment-only analyzer reported a false "0/1 replicas available").
+	r, _, err := Workload(load(t, "daemonset_healthy.json"), "daemonset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Healthy || len(r.Findings) != 0 {
+		t.Fatalf("healthy daemonset should not be flagged, got %+v", r.Findings)
+	}
+}
+
+func TestWorkload_StatefulSet_Healthy(t *testing.T) {
+	r, selector, err := Workload(load(t, "statefulset_healthy.json"), "statefulset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Healthy || len(r.Findings) != 0 {
+		t.Fatalf("healthy statefulset should not be flagged, got %+v", r.Findings)
+	}
+	if r.Signals["ready"] != "3" || selector != "app=postgres" {
+		t.Fatalf("statefulset signals/selector wrong: %+v selector=%q", r.Signals, selector)
 	}
 }
 

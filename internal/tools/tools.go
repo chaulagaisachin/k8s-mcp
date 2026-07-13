@@ -23,6 +23,17 @@ type Result struct {
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"true if the output was capped"`
 }
 
+// addTool registers a tool, stamping ReadOnlyHint on it. Every tool in this
+// server is read-only by construction, so this is applied uniformly — it lets
+// MCP hosts safely auto-approve these tools.
+func addTool[In, Out any](s *mcp.Server, t *mcp.Tool, h func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, Out, error)) {
+	if t.Annotations == nil {
+		t.Annotations = &mcp.ToolAnnotations{}
+	}
+	t.Annotations.ReadOnlyHint = true
+	mcp.AddTool(s, t, h)
+}
+
 // RegisterAll wires every tool onto the server.
 func RegisterAll(s *mcp.Server, d *Deps) {
 	registerContexts(s, d)

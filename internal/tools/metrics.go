@@ -20,7 +20,7 @@ type TopPodsInput struct {
 }
 
 func registerMetrics(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "top_nodes",
 		Description: "Show CPU/memory usage per node (requires metrics-server).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TopNodesInput) (*mcp.CallToolResult, Result, error) {
@@ -31,7 +31,7 @@ func registerMetrics(s *mcp.Server, d *Deps) {
 		return finalize([]string{"top", "nodes"}, out)
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "top_pods",
 		Description: "Show CPU/memory usage per pod (requires metrics-server).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TopPodsInput) (*mcp.CallToolResult, Result, error) {

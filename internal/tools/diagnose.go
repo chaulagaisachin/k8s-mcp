@@ -52,22 +52,22 @@ type DiagnoseNodeInput struct {
 }
 
 func registerDiagnose(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "diagnose_pod",
 		Description: "Diagnose why a pod is unhealthy: detects CrashLoopBackOff, OOMKilled, image-pull, config, init-container, probe, scheduling and volume failures, with describe+logs as evidence. Read-only; detects Kubernetes-level failures, not application bugs.",
 	}, d.diagnosePod)
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "diagnose_deployment",
 		Description: "Diagnose a deployment/statefulset/daemonset: rollout state and replica availability, drilling into its unhealthy pods.",
 	}, d.diagnoseDeployment)
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "diagnose_namespace",
 		Description: "Triage a namespace: lists not-ready/failing pods with their top finding plus recent warning events. Skips completed jobs.",
 	}, d.diagnoseNamespace)
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "diagnose_node",
 		Description: "Diagnose a node: Ready/MemoryPressure/DiskPressure/PIDPressure conditions, cordon status, and capacity.",
 	}, d.diagnoseNode)
@@ -132,7 +132,7 @@ func (d *Deps) diagnoseDeployment(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, DiagnoseOutput{}, notFoundOr(typ, in.Name, in.Namespace, err)
 	}
-	report, selector, err := analyze.Deployment(raw)
+	report, selector, err := analyze.Workload(raw, typ)
 	if err != nil {
 		return nil, DiagnoseOutput{}, err
 	}

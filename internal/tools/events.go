@@ -16,7 +16,7 @@ type GetEventsInput struct {
 }
 
 func registerEvents(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "get_events",
 		Description: "List cluster events, most recent last. Optionally scope to a namespace or a single object.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetEventsInput) (*mcp.CallToolResult, Result, error) {

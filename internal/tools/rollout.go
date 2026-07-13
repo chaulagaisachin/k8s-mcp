@@ -35,7 +35,7 @@ type RolloutHistoryInput struct {
 }
 
 func registerRollout(s *mcp.Server, d *Deps) {
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "rollout_status",
 		Description: "Show the current rollout status of a deployment/statefulset/daemonset (does not wait).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RolloutStatusInput) (*mcp.CallToolResult, Result, error) {
@@ -52,7 +52,7 @@ func registerRollout(s *mcp.Server, d *Deps) {
 		return d.run(ctx, in.Context, args...)
 	})
 
-	mcp.AddTool(s, &mcp.Tool{
+	addTool(s, &mcp.Tool{
 		Name:        "rollout_history",
 		Description: "Show the revision history of a deployment/statefulset/daemonset.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RolloutHistoryInput) (*mcp.CallToolResult, Result, error) {
