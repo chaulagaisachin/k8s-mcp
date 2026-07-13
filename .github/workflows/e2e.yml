@@ -1,9 +1,10 @@
 name: e2e
 
+# Disabled by default: this workflow spins up a kind cluster and is only run
+# manually (Actions tab → "Run workflow"). Re-enable automatic runs by adding
+# push/pull_request triggers here.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   e2e:
