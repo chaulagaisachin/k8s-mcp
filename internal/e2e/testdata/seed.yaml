@@ -1,0 +1,44 @@
+# Deterministic workloads seeded into a throwaway kind cluster for e2e tests.
+# One healthy Deployment, one CrashLoopBackOff pod, one ImagePullBackOff pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthy-web
+  namespace: k8s-mcp-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healthy-web
+  template:
+    metadata:
+      labels:
+        app: healthy-web
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crasher
+  namespace: k8s-mcp-e2e
+  labels:
+    app: crasher
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "exit 1"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: badimage
+  namespace: k8s-mcp-e2e
+spec:
+  containers:
+    - name: app
+      image: registry.k8s.io/does-not-exist:v0

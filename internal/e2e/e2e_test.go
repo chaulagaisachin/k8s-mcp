@@ -1,0 +1,212 @@
+//go:build e2e
+
+// Package e2e drives the built k8s-mcp server against a real Kubernetes cluster
+// over MCP, asserting on live responses. It is build-tagged `e2e` so it never
+// runs in the normal `go test ./...`.
+//
+// SAFETY: it creates and deletes a namespace, so it refuses to run unless the
+// current context is a kind cluster (name starts with "kind-"), or
+// K8S_MCP_E2E_ALLOW_ANY=1 is set. Run with: go test -tags e2e ./internal/e2e/
+package e2e
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"k8s-mcp/internal/analyze"
+	"k8s-mcp/internal/tools"
+)
+
+const namespace = "k8s-mcp-e2e"
+
+func TestE2E(t *testing.T) {
+	ctx := context.Background()
+	guardCluster(t)
+
+	// Seed deterministic workloads and clean up afterwards.
+	kubectl(t, "create", "namespace", namespace)
+	t.Cleanup(func() {
+		_ = exec.Command("kubectl", "delete", "namespace", namespace, "--wait=false").Run()
+	})
+	kubectl(t, "apply", "-f", "testdata/seed.yaml")
+
+	waitForWaitingReason(t, "crasher", "CrashLoopBackOff")
+	waitForWaitingReason(t, "badimage", "ImagePullBackOff", "ErrImagePull")
+
+	// Build and connect to the server.
+	bin := filepath.Join(t.TempDir(), "k8s-mcp")
+	build(t, bin)
+	client := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.Command(bin)}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	t.Run("tools_are_read_only", func(t *testing.T) {
+		res, err := session.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Tools) < 19 {
+			t.Fatalf("expected >=19 tools, got %d", len(res.Tools))
+		}
+		for _, tool := range res.Tools {
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+				t.Errorf("tool %q missing ReadOnlyHint", tool.Name)
+			}
+		}
+	})
+
+	t.Run("diagnose_pod_crashloop", func(t *testing.T) {
+		out := diagnose(t, ctx, session, "diagnose_pod", map[string]any{"pod": "crasher", "namespace": namespace, "log_lines": 3})
+		if out.Healthy {
+			t.Fatal("crasher should be unhealthy")
+		}
+		if !hasCritical(out.Findings) {
+			t.Fatalf("expected a critical finding, got %+v", out.Findings)
+		}
+		if out.Evidence == "" {
+			t.Fatal("expected evidence to be attached")
+		}
+	})
+
+	t.Run("diagnose_pod_imagepull", func(t *testing.T) {
+		out := diagnose(t, ctx, session, "diagnose_pod", map[string]any{"pod": "badimage", "namespace": namespace})
+		if out.Healthy || findingWith(out.Findings, "image") == nil {
+			t.Fatalf("expected image-pull finding, got %+v", out.Findings)
+		}
+	})
+
+	t.Run("diagnose_namespace", func(t *testing.T) {
+		out := diagnose(t, ctx, session, "diagnose_namespace", map[string]any{"namespace": namespace})
+		unhealthy, _ := strconv.Atoi(out.Signals["unhealthy_pods"])
+		if out.Healthy || unhealthy < 2 {
+			t.Fatalf("expected >=2 unhealthy pods, got %+v", out.Signals)
+		}
+	})
+
+	t.Run("diagnose_deployment_healthy", func(t *testing.T) {
+		out := diagnose(t, ctx, session, "diagnose_deployment", map[string]any{"name": "healthy-web", "namespace": namespace})
+		if !out.Healthy {
+			t.Fatalf("healthy-web should be healthy, got %+v", out.Findings)
+		}
+	})
+
+	t.Run("list_resources_sees_seeded_pods", func(t *testing.T) {
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "list_resources", Arguments: map[string]any{"type": "pods", "namespace": namespace, "format": "name"},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("list_resources failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+		var r tools.Result
+		decode(t, res.StructuredContent, &r)
+		if !strings.Contains(r.Output, "crasher") || !strings.Contains(r.Output, "badimage") {
+			t.Fatalf("expected seeded pods in output: %q", r.Output)
+		}
+	})
+}
+
+// --- helpers ---
+
+func guardCluster(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not found; skipping e2e")
+	}
+	out, err := exec.Command("kubectl", "config", "current-context").Output()
+	if err != nil {
+		t.Skip("no current kube context; skipping e2e")
+	}
+	kctx := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(kctx, "kind-") && os.Getenv("K8S_MCP_E2E_ALLOW_ANY") != "1" {
+		t.Skipf("refusing to run e2e against non-kind context %q (set K8S_MCP_E2E_ALLOW_ANY=1 to override)", kctx)
+	}
+}
+
+func build(t *testing.T, out string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", out, "k8s-mcp")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %v\n%s", err, b)
+	}
+}
+
+func kubectl(t *testing.T, args ...string) {
+	t.Helper()
+	if b, err := exec.Command("kubectl", args...).CombinedOutput(); err != nil {
+		t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, b)
+	}
+}
+
+// waitForWaitingReason polls until the pod's first container reports one of the
+// given waiting reasons.
+func waitForWaitingReason(t *testing.T, pod string, reasons ...string) {
+	t.Helper()
+	jsonpath := "-o=jsonpath={.status.containerStatuses[0].state.waiting.reason}"
+	deadline := time.Now().Add(120 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("kubectl", "get", "pod", pod, "-n", namespace, jsonpath).Output()
+		got := strings.TrimSpace(string(out))
+		for _, r := range reasons {
+			if got == r {
+				return
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatalf("pod %s never reached waiting reason %v", pod, reasons)
+}
+
+func diagnose(t *testing.T, ctx context.Context, s *mcp.ClientSession, name string, args map[string]any) tools.DiagnoseOutput {
+	t.Helper()
+	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatalf("%s call error: %v", name, err)
+	}
+	if res.IsError {
+		t.Fatalf("%s returned isError: %v", name, res.Content)
+	}
+	var out tools.DiagnoseOutput
+	decode(t, res.StructuredContent, &out)
+	return out
+}
+
+func decode(t *testing.T, v any, into any) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, into); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+}
+
+func hasCritical(fs []analyze.Finding) bool {
+	for _, f := range fs {
+		if f.Severity == analyze.Critical {
+			return true
+		}
+	}
+	return false
+}
+
+func findingWith(fs []analyze.Finding, sub string) *analyze.Finding {
+	for i := range fs {
+		if strings.Contains(fs[i].Problem, sub) {
+			return &fs[i]
+		}
+	}
+	return nil
+}
