@@ -35,6 +35,23 @@ make build      # produces ./k8s-mcp
 | `get_events` | Cluster events, optionally scoped to a namespace or object |
 | `top_nodes`, `top_pods` | CPU/memory usage (requires metrics-server) |
 | `rollout_status`, `rollout_history` | Workload rollout state (does not wait) |
+| `diagnose_pod` | Analyze one pod: crashloop, OOMKilled, image-pull, config, init-container, probe, scheduling, volume failures — with describe+logs evidence |
+| `diagnose_deployment` | Rollout/replica health, drilling into unhealthy pods |
+| `diagnose_namespace` | Triage a namespace: not-ready/failing pods + warning events (skips completed jobs) |
+| `diagnose_node` | Node conditions (Ready/pressure), cordon status, capacity |
+
+### Diagnostics
+
+The `diagnose_*` tools are a rule-based analyzer: they fetch the relevant
+signals (object status **and** warning events) in one call, detect well-known
+failure signatures, and return **structured findings** — `severity`, `problem`,
+the offending `container`, probable `cause`, an advisory `suggestion`, and the
+`evidence` each finding is grounded in. They stay read-only: suggestions are
+text only and are never executed. Every `diagnose_pod` result also attaches raw
+describe/log evidence so the model can verify or override a finding.
+
+They detect **Kubernetes-level** failures (scheduling, images, OOM, probes,
+volumes), not application-level bugs — those show up in the attached logs.
 
 ## Safety
 

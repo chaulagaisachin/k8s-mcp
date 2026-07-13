@@ -1,0 +1,23 @@
+{
+  "metadata": {"name": "initfail", "namespace": "default"},
+  "status": {
+    "phase": "Pending",
+    "initContainerStatuses": [
+      {
+        "name": "migrate",
+        "ready": false,
+        "restartCount": 3,
+        "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off restarting failed init container"}},
+        "lastState": {"terminated": {"exitCode": 2, "reason": "Error"}}
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": false,
+        "restartCount": 0,
+        "state": {"waiting": {"reason": "PodInitializing"}}
+      }
+    ]
+  }
+}

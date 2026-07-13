@@ -31,6 +31,7 @@ func RegisterAll(s *mcp.Server, d *Deps) {
 	registerEvents(s, d)
 	registerMetrics(s, d)
 	registerRollout(s, d)
+	registerDiagnose(s, d)
 }
 
 // kctx resolves the effective context: the per-call override, else the session

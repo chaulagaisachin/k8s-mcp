@@ -1,0 +1,14 @@
+{
+  "metadata": {"name": "job-run", "namespace": "default"},
+  "status": {
+    "phase": "Succeeded",
+    "containerStatuses": [
+      {
+        "name": "task",
+        "ready": false,
+        "restartCount": 0,
+        "state": {"terminated": {"exitCode": 0, "reason": "Completed"}}
+      }
+    ]
+  }
+}

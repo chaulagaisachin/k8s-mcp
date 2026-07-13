@@ -1,0 +1,14 @@
+{
+  "metadata": {"name": "worker-1"},
+  "spec": {"unschedulable": false},
+  "status": {
+    "capacity": {"cpu": "8", "memory": "32Gi"},
+    "allocatable": {"cpu": "7800m", "memory": "31Gi"},
+    "conditions": [
+      {"type": "MemoryPressure", "status": "True", "message": "kubelet has memory pressure"},
+      {"type": "DiskPressure", "status": "False"},
+      {"type": "PIDPressure", "status": "False"},
+      {"type": "Ready", "status": "True"}
+    ]
+  }
+}

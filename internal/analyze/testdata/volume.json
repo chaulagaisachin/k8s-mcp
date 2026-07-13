@@ -1,0 +1,14 @@
+{
+  "metadata": {"name": "novolume", "namespace": "default"},
+  "status": {
+    "phase": "Pending",
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": false,
+        "restartCount": 0,
+        "state": {"waiting": {"reason": "ContainerCreating"}}
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "metadata": {"name": "unscheduled", "namespace": "default"},
+  "status": {
+    "phase": "Pending",
+    "conditions": [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable"}]
+  }
+}

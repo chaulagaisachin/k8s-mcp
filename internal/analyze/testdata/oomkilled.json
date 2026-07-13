@@ -1,0 +1,15 @@
+{
+  "metadata": {"name": "hungry", "namespace": "default"},
+  "status": {
+    "phase": "Running",
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": false,
+        "restartCount": 4,
+        "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off restarting"}},
+        "lastState": {"terminated": {"exitCode": 137, "reason": "OOMKilled"}}
+      }
+    ]
+  }
+}

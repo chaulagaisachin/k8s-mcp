@@ -1,0 +1,15 @@
+{
+  "metadata": {"name": "good", "namespace": "default"},
+  "status": {
+    "phase": "Running",
+    "conditions": [{"type": "Ready", "status": "True"}],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": true,
+        "restartCount": 0,
+        "state": {"running": {"startedAt": "2026-07-14T00:00:00Z"}}
+      }
+    ]
+  }
+}

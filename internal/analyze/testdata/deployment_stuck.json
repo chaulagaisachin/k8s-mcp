@@ -1,0 +1,17 @@
+{
+  "metadata": {"name": "web", "namespace": "default"},
+  "spec": {
+    "replicas": 3,
+    "selector": {"matchLabels": {"app": "web", "tier": "frontend"}}
+  },
+  "status": {
+    "replicas": 3,
+    "readyReplicas": 1,
+    "availableReplicas": 1,
+    "updatedReplicas": 3,
+    "conditions": [
+      {"type": "Available", "status": "False", "message": "Deployment does not have minimum availability."},
+      {"type": "Progressing", "status": "False", "reason": "ProgressDeadlineExceeded", "message": "ReplicaSet \"web-abc\" has timed out progressing."}
+    ]
+  }
+}
