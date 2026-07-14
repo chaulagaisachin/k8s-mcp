@@ -1,10 +1,28 @@
 # k8s-mcp
 
-A Kubernetes MCP server, written in Go. It gives an MCP client (e.g. Claude
-Code) safe, structured access to a cluster — inspect resources, read logs, see
-events, check resource usage, and diagnose failures. It is **read-only by
-default**; a small set of write operations exists but is **disabled unless you
-explicitly opt in** (`K8S_MCP_ENABLE_WRITES=1`).
+**An AI-accessible diagnostic/observability layer for Kubernetes.** It lets an
+assistant (e.g. Claude Code) *ask the cluster questions in natural language
+during triage — without being handed raw cluster credentials.* It's
+complementary to GitOps tooling like ArgoCD/Helm, not a replacement: those
+manage **delivery and desired state**; this is the **runtime debugging** layer
+they don't provide.
+
+Written in Go; wraps `kubectl`. **Read-only by default** — inspect resources,
+read logs, see events, check usage, and get opinionated failure diagnoses. A
+small set of write operations exists for break-glass use but is **disabled
+unless you opt in** (`K8S_MCP_ENABLE_WRITES=1`).
+
+### When to use it (and when not to)
+
+- **Use it for:** triage and debugging — "why is this pod crashing?", "what's
+  unhealthy in this namespace?", "is this node under pressure?" — safely, with
+  secret redaction, output caps, and an audit log, instead of giving an LLM raw
+  `kubectl`.
+- **Don't use it for:** routine changes in a GitOps shop. If ArgoCD/Helm own
+  your desired state, remediate by committing to git — imperative `scale` /
+  `rollout undo` / `rollout restart` cause drift. The write tools are for
+  break-glass only (and `delete_pod` / `cordon` / `uncordon` are the
+  GitOps-safe ones).
 
 It works by wrapping your local `kubectl`: every tool builds a fixed argument
 list (never a shell string), only ever uses read-only verbs, and always targets
