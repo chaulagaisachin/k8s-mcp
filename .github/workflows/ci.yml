@@ -17,7 +17,10 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      # Build golangci-lint from source with this job's Go toolchain. The action's
+      # prebuilt binary lags new Go releases and refuses to lint a module whose
+      # go directive is newer than golangci-lint's own build Go version.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          "$(go env GOPATH)/bin/golangci-lint" run

@@ -30,7 +30,7 @@ a context explicitly without touching your kubeconfig file.
 
 ## Requirements
 
-- Go 1.26+ (only to build)
+- Go 1.25+ (only to build)
 - `kubectl` on `PATH`, with a working kubeconfig
 
 ## Build
