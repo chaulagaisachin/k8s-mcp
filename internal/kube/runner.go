@@ -43,15 +43,28 @@ var allowedConfigSub = map[string]bool{
 // allowedAuthSub restricts `auth` to the read-only permission query.
 var allowedAuthSub = map[string]bool{"can-i": true}
 
+// writeVerbs is the allowlist for the mutating path (RunWrite only).
+var writeVerbs = map[string]bool{
+	"scale":    true,
+	"delete":   true,
+	"rollout":  true,
+	"cordon":   true,
+	"uncordon": true,
+}
+
+// allowedWriteRolloutSub restricts mutating `rollout` to restart/undo.
+var allowedWriteRolloutSub = map[string]bool{"restart": true, "undo": true}
+
 // Runner executes kubectl with a fixed argv (never a shell string).
 type Runner struct {
-	Bin     string
-	Timeout time.Duration
-	audit   *auditor
+	Bin           string
+	Timeout       time.Duration
+	audit         *auditor
+	writesEnabled bool
 }
 
 // NewRunner builds a Runner from the environment (K8S_MCP_KUBECTL,
-// K8S_MCP_TIMEOUT_SECONDS, and the K8S_MCP_AUDIT* variables).
+// K8S_MCP_TIMEOUT_SECONDS, K8S_MCP_ENABLE_WRITES, and the K8S_MCP_AUDIT* variables).
 func NewRunner() *Runner {
 	bin := os.Getenv("K8S_MCP_KUBECTL")
 	if bin == "" {
@@ -63,7 +76,38 @@ func NewRunner() *Runner {
 			timeout = time.Duration(n) * time.Second
 		}
 	}
-	return &Runner{Bin: bin, Timeout: timeout, audit: newAuditor()}
+	writes := os.Getenv("K8S_MCP_ENABLE_WRITES")
+	return &Runner{
+		Bin:           bin,
+		Timeout:       timeout,
+		audit:         newAuditor(),
+		writesEnabled: writes == "1" || writes == "true",
+	}
+}
+
+// WritesEnabled reports whether mutating operations are permitted.
+func (r *Runner) WritesEnabled() bool { return r.writesEnabled }
+
+// validateWrite enforces the mutating-path allowlist.
+func validateWrite(args []string) error {
+	if len(args) == 0 {
+		return errors.New("no kubectl command given")
+	}
+	verb := args[0]
+	if !writeVerbs[verb] {
+		return fmt.Errorf("write verb %q is not permitted", verb)
+	}
+	switch verb {
+	case "rollout":
+		if len(args) < 2 || !allowedWriteRolloutSub[args[1]] {
+			return errors.New("only 'rollout restart' and 'rollout undo' are permitted")
+		}
+	case "delete":
+		if len(args) < 2 || (args[1] != "pod" && args[1] != "pods") {
+			return errors.New("delete is restricted to pods")
+		}
+	}
+	return nil
 }
 
 // validate enforces the read-only verb/subcommand allowlist.
@@ -92,13 +136,10 @@ func validate(args []string) error {
 	return nil
 }
 
-// exec validates, runs kubectl with a per-call timeout, audits the invocation,
-// and returns raw stdout/stderr plus the run error (without interpreting it).
+// exec runs kubectl with a per-call timeout and audits the invocation, returning
+// raw stdout/stderr plus the run error (without interpreting it). Callers are
+// responsible for allowlist validation before calling.
 func (r *Runner) exec(ctx context.Context, kctx string, args []string) (stdout, stderr string, timedOut bool, err error) {
-	if verr := validate(args); verr != nil {
-		return "", "", false, verr
-	}
-
 	full := append([]string{}, args...)
 	if kctx != "" && args[0] != "config" {
 		full = append(full, "--context", kctx)
@@ -134,7 +175,29 @@ func (r *Runner) exec(ctx context.Context, kctx string, args []string) (stdout, 
 // --context (except for `config`). It returns stdout, or an error carrying
 // kubectl's stderr. A non-zero exit is treated as an error.
 func (r *Runner) Run(ctx context.Context, kctx string, args ...string) (string, error) {
+	if verr := validate(args); verr != nil {
+		return "", verr
+	}
 	stdout, stderr, timedOut, err := r.exec(ctx, kctx, args)
+	return r.interpret(stdout, stderr, timedOut, err)
+}
+
+// RunWrite executes a mutating kubectl command. It requires writes to be enabled
+// (K8S_MCP_ENABLE_WRITES) and validates against the separate write allowlist, so
+// the read path can never mutate.
+func (r *Runner) RunWrite(ctx context.Context, kctx string, args ...string) (string, error) {
+	if !r.writesEnabled {
+		return "", errors.New("write operations are disabled; set K8S_MCP_ENABLE_WRITES=1 to enable")
+	}
+	if verr := validateWrite(args); verr != nil {
+		return "", verr
+	}
+	stdout, stderr, timedOut, err := r.exec(ctx, kctx, args)
+	return r.interpret(stdout, stderr, timedOut, err)
+}
+
+// interpret converts a raw exec result into stdout or a clean error.
+func (r *Runner) interpret(stdout, stderr string, timedOut bool, err error) (string, error) {
 	if err != nil {
 		if timedOut {
 			return "", fmt.Errorf("kubectl timed out after %s", r.Timeout)
@@ -152,6 +215,9 @@ func (r *Runner) Run(ctx context.Context, kctx string, args ...string) (string, 
 // `auth can-i` that signal their answer via the exit code ("no" => exit 1).
 // Only failure-to-start and timeouts return an error.
 func (r *Runner) RunAllowNonZero(ctx context.Context, kctx string, args ...string) (out string, ok bool, err error) {
+	if verr := validate(args); verr != nil {
+		return "", false, verr
+	}
 	stdout, stderr, timedOut, exErr := r.exec(ctx, kctx, args)
 	if timedOut {
 		return "", false, fmt.Errorf("kubectl timed out after %s", r.Timeout)

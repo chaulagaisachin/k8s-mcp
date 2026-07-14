@@ -1,9 +1,10 @@
 # k8s-mcp
 
-A **read-only** Kubernetes observability MCP server, written in Go. It gives an
-MCP client (e.g. Claude Code) safe, structured access to a cluster — inspect
-resources, read logs, see events, check resource usage — with **no ability to
-mutate** anything.
+A Kubernetes MCP server, written in Go. It gives an MCP client (e.g. Claude
+Code) safe, structured access to a cluster — inspect resources, read logs, see
+events, check resource usage, and diagnose failures. It is **read-only by
+default**; a small set of write operations exists but is **disabled unless you
+explicitly opt in** (`K8S_MCP_ENABLE_WRITES=1`).
 
 It works by wrapping your local `kubectl`: every tool builds a fixed argument
 list (never a shell string), only ever uses read-only verbs, and always targets
@@ -41,6 +42,21 @@ make build      # produces ./k8s-mcp
 | `diagnose_node` | Node conditions (Ready/pressure), cordon status, capacity |
 | `auth_can_i` | Check whether the current credentials may perform an action (`kubectl auth can-i`); `list=true` lists all permissions |
 
+### Write operations (opt-in)
+
+Disabled unless `K8S_MCP_ENABLE_WRITES=1`. Each carries a `destructive` hint so
+the MCP host prompts before every call, supports an optional `dry_run` (server-side)
+where kubectl allows, and is audit-logged. The read path cannot mutate — writes
+go through a separate allowlisted runner path.
+
+| Tool | Action |
+|---|---|
+| `rollout_restart` | Rolling restart of a deployment/statefulset/daemonset |
+| `scale` | Set replica count on a deployment/statefulset/replicaset |
+| `rollout_undo` | Roll back to the previous (or a specific) revision |
+| `delete_pod` | Delete a pod (controller recreates it) |
+| `cordon` / `uncordon` | Toggle a node's schedulability |
+
 ### Diagnostics
 
 The `diagnose_*` tools are a rule-based analyzer: they fetch the relevant
@@ -56,10 +72,14 @@ volumes), not application-level bugs — those show up in the attached logs.
 
 ## Safety
 
-- **Read-only by construction.** Verbs are hardcoded per tool and re-checked
-  against an allowlist (`get`, `describe`, `logs`, `top`, `events`,
+- **Read-only by default.** Read verbs are hardcoded per tool and re-checked
+  against a read allowlist (`get`, `describe`, `logs`, `top`, `events`,
   `api-resources`, `version`, `cluster-info`, `rollout status/history`,
-  read-only `config`). No `apply`/`delete`/`edit`/`scale`/`patch`/`exec`.
+  `auth can-i`, read-only `config`). Mutations go through a **separate**
+  allowlisted path (`RunWrite`) that is refused entirely unless
+  `K8S_MCP_ENABLE_WRITES=1`; even then only `scale`, `delete pod`,
+  `rollout restart/undo`, and `cordon`/`uncordon` are permitted (no `apply`,
+  `edit`, `patch`, `exec`, or deleting anything other than pods).
 - **Secrets redacted by default.** `get_resource`/`list_resources` on Secrets
   blank `.data`/`.stringData` values (keys and byte counts kept). Set
   `K8S_MCP_ALLOW_SECRETS=true` to disable.
@@ -79,6 +99,7 @@ volumes), not application-level bugs — those show up in the attached logs.
 | `K8S_MCP_REDACT_LOGS` | on | `off` disables best-effort log-secret redaction |
 | `K8S_MCP_AUDIT` | on | `off` disables the audit log |
 | `K8S_MCP_AUDIT_LOG` | unset | file path to also append audit JSON lines |
+| `K8S_MCP_ENABLE_WRITES` | unset | `1`/`true` enables the write operations (off by default) |
 
 ## Use with Claude Code
 

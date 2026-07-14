@@ -42,27 +42,34 @@ func TestE2E(t *testing.T) {
 	waitForWaitingReason(t, "crasher", "CrashLoopBackOff")
 	waitForWaitingReason(t, "badimage", "ImagePullBackOff", "ErrImagePull")
 
-	// Build and connect to the server.
+	// Build and connect. Two sessions: read-only (default) and writes-enabled.
 	bin := filepath.Join(t.TempDir(), "k8s-mcp")
 	build(t, bin)
-	client := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil)
-	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.Command(bin)}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
+	session := connect(t, ctx, bin, false)
 	defer session.Close()
+	writeSession := connect(t, ctx, bin, true)
+	defer writeSession.Close()
 
-	t.Run("tools_are_read_only", func(t *testing.T) {
+	t.Run("tool_annotations", func(t *testing.T) {
+		writeNames := map[string]bool{
+			"rollout_restart": true, "scale": true, "rollout_undo": true,
+			"delete_pod": true, "cordon": true, "uncordon": true,
+		}
 		res, err := session.ListTools(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(res.Tools) < 19 {
-			t.Fatalf("expected >=19 tools, got %d", len(res.Tools))
+		if len(res.Tools) < 26 {
+			t.Fatalf("expected >=26 tools, got %d", len(res.Tools))
 		}
 		for _, tool := range res.Tools {
-			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
-				t.Errorf("tool %q missing ReadOnlyHint", tool.Name)
+			ann := tool.Annotations
+			if writeNames[tool.Name] {
+				if ann == nil || ann.DestructiveHint == nil || !*ann.DestructiveHint {
+					t.Errorf("write tool %q missing DestructiveHint", tool.Name)
+				}
+			} else if ann == nil || !ann.ReadOnlyHint {
+				t.Errorf("read tool %q missing ReadOnlyHint", tool.Name)
 			}
 		}
 	})
@@ -148,6 +155,65 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("expected allowed=yes, got %+v", a)
 		}
 	})
+
+	t.Run("write_refused_when_disabled", func(t *testing.T) {
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "scale", Arguments: map[string]any{"name": "healthy-web", "namespace": namespace, "replicas": 2},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatal("scale must be refused when writes are disabled")
+		}
+	})
+
+	t.Run("scale", func(t *testing.T) {
+		res, err := writeSession.CallTool(ctx, &mcp.CallToolParams{
+			Name: "scale", Arguments: map[string]any{"name": "healthy-web", "namespace": namespace, "replicas": 2},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("scale failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+		waitForReplicas(t, "healthy-web", "2")
+	})
+
+	t.Run("scale_dry_run_does_not_apply", func(t *testing.T) {
+		res, err := writeSession.CallTool(ctx, &mcp.CallToolParams{
+			Name: "scale", Arguments: map[string]any{"name": "healthy-web", "namespace": namespace, "replicas": 5, "dry_run": true},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("dry-run scale failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+		// spec.replicas must still be 2 (dry-run applied nothing).
+		out, _ := exec.Command("kubectl", "get", "deploy", "healthy-web", "-n", namespace, "-o=jsonpath={.spec.replicas}").Output()
+		if strings.TrimSpace(string(out)) != "2" {
+			t.Fatalf("dry-run changed replicas: got %q, want 2", out)
+		}
+	})
+
+	t.Run("rollout_restart", func(t *testing.T) {
+		res, err := writeSession.CallTool(ctx, &mcp.CallToolParams{
+			Name: "rollout_restart", Arguments: map[string]any{"name": "healthy-web", "namespace": namespace},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("rollout_restart failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+	})
+
+	t.Run("cordon_uncordon", func(t *testing.T) {
+		out, err := exec.Command("kubectl", "get", "nodes", "-o=jsonpath={.items[0].metadata.name}").Output()
+		if err != nil {
+			t.Fatalf("get node: %v", err)
+		}
+		node := strings.TrimSpace(string(out))
+		for _, tool := range []string{"cordon", "uncordon"} {
+			res, err := writeSession.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: map[string]any{"node": node}})
+			if err != nil || res.IsError {
+				t.Fatalf("%s failed: %v isErr=%v", tool, err, res != nil && res.IsError)
+			}
+		}
+	})
 }
 
 // --- helpers ---
@@ -165,6 +231,37 @@ func guardCluster(t *testing.T) {
 	if !strings.HasPrefix(kctx, "kind-") && os.Getenv("K8S_MCP_E2E_ALLOW_ANY") != "1" {
 		t.Skipf("refusing to run e2e against non-kind context %q (set K8S_MCP_E2E_ALLOW_ANY=1 to override)", kctx)
 	}
+}
+
+// connect builds a client session to a freshly spawned server. writes toggles
+// K8S_MCP_ENABLE_WRITES on the server process.
+func connect(t *testing.T, ctx context.Context, bin string, writes bool) *mcp.ClientSession {
+	t.Helper()
+	cmd := exec.Command(bin)
+	cmd.Env = os.Environ()
+	if writes {
+		cmd.Env = append(cmd.Env, "K8S_MCP_ENABLE_WRITES=1")
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil)
+	s, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("connect (writes=%v): %v", writes, err)
+	}
+	return s
+}
+
+// waitForReplicas polls until a deployment's spec.replicas equals want.
+func waitForReplicas(t *testing.T, deploy, want string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("kubectl", "get", "deploy", deploy, "-n", namespace, "-o=jsonpath={.spec.replicas}").Output()
+		if strings.TrimSpace(string(out)) == want {
+			return
+		}
+		time.Sleep(1 * time.Second)
+	}
+	t.Fatalf("deployment %s never reached %s replicas", deploy, want)
 }
 
 func build(t *testing.T, out string) {

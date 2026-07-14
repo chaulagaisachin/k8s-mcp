@@ -34,6 +34,18 @@ func addTool[In, Out any](s *mcp.Server, t *mcp.Tool, h func(context.Context, *m
 	mcp.AddTool(s, t, h)
 }
 
+// addWriteTool registers a mutating tool, stamping DestructiveHint so MCP hosts
+// prompt before every call. Execution is still gated by K8S_MCP_ENABLE_WRITES in
+// the runner.
+func addWriteTool[In, Out any](s *mcp.Server, t *mcp.Tool, h func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, Out, error)) {
+	if t.Annotations == nil {
+		t.Annotations = &mcp.ToolAnnotations{}
+	}
+	destructive := true
+	t.Annotations.DestructiveHint = &destructive
+	mcp.AddTool(s, t, h)
+}
+
 // RegisterAll wires every tool onto the server.
 func RegisterAll(s *mcp.Server, d *Deps) {
 	registerContexts(s, d)
@@ -44,6 +56,7 @@ func RegisterAll(s *mcp.Server, d *Deps) {
 	registerRollout(s, d)
 	registerDiagnose(s, d)
 	registerAuth(s, d)
+	registerOps(s, d)
 }
 
 // kctx resolves the effective context: the per-call override, else the session
@@ -58,6 +71,16 @@ func (d *Deps) kctx(override string) string {
 // run executes a read-only kubectl command and packages the capped result.
 func (d *Deps) run(ctx context.Context, override string, args ...string) (*mcp.CallToolResult, Result, error) {
 	out, err := d.Runner.Run(ctx, d.kctx(override), args...)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	return finalize(args, out)
+}
+
+// runWrite executes a mutating kubectl command (gated by the runner) and packages
+// the capped result.
+func (d *Deps) runWrite(ctx context.Context, override string, args ...string) (*mcp.CallToolResult, Result, error) {
+	out, err := d.Runner.RunWrite(ctx, d.kctx(override), args...)
 	if err != nil {
 		return nil, Result{}, err
 	}
