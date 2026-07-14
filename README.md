@@ -39,6 +39,7 @@ make build      # produces ./k8s-mcp
 | `diagnose_deployment` | Rollout/replica health, drilling into unhealthy pods |
 | `diagnose_namespace` | Triage a namespace: not-ready/failing pods + warning events (skips completed jobs) |
 | `diagnose_node` | Node conditions (Ready/pressure), cordon status, capacity |
+| `auth_can_i` | Check whether the current credentials may perform an action (`kubectl auth can-i`); `list=true` lists all permissions |
 
 ### Diagnostics
 
@@ -64,6 +65,8 @@ volumes), not application-level bugs — those show up in the attached logs.
   `K8S_MCP_ALLOW_SECRETS=true` to disable.
 - **Output capped** to `K8S_MCP_MAX_BYTES` (default 50000) with a truncation marker.
 - `set_context` never writes to `~/.kube/config`.
+- **Log-secret redaction (best-effort, default on).** `get_logs` and `diagnose_pod` evidence are scrubbed for high-confidence secret shapes (JWTs, Bearer tokens, AWS keys, PEM private keys, `password=`/`token=` assignments, long base64/hex blobs). Best-effort only — may miss novel secrets or over-redact. Disable with `K8S_MCP_REDACT_LOGS=off`.
+- **Audit log.** Every kubectl invocation is logged as a JSON line to stderr (`{ts, verb, args, context, duration_ms, ok, error}`). Set `K8S_MCP_AUDIT_LOG=/path` to also append to a file, or `K8S_MCP_AUDIT=off` to disable.
 
 ## Configuration (env)
 
@@ -72,7 +75,10 @@ volumes), not application-level bugs — those show up in the attached logs.
 | `K8S_MCP_KUBECTL` | `kubectl` | kubectl binary path |
 | `K8S_MCP_TIMEOUT_SECONDS` | `30` | per-command timeout |
 | `K8S_MCP_MAX_BYTES` | `50000` | output size ceiling |
-| `K8S_MCP_ALLOW_SECRETS` | unset | `true`/`1` disables Secret redaction |
+| `K8S_MCP_ALLOW_SECRETS` | unset | `true`/`1` disables Secret-object redaction |
+| `K8S_MCP_REDACT_LOGS` | on | `off` disables best-effort log-secret redaction |
+| `K8S_MCP_AUDIT` | on | `off` disables the audit log |
+| `K8S_MCP_AUDIT_LOG` | unset | file path to also append audit JSON lines |
 
 ## Use with Claude Code
 

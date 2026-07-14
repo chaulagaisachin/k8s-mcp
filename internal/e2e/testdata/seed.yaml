@@ -42,3 +42,17 @@ spec:
   containers:
     - name: app
       image: registry.k8s.io/does-not-exist:v0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: logger
+  namespace: k8s-mcp-e2e
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - "echo 'startup: db_password=hunter2secret aws=AKIAIOSFODNN7EXAMPLE'; sleep 3600"

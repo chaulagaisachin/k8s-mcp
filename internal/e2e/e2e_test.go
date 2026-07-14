@@ -115,6 +115,39 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("expected seeded pods in output: %q", r.Output)
 		}
 	})
+
+	t.Run("logs_are_redacted", func(t *testing.T) {
+		waitForPhase(t, "logger", "Running")
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "get_logs", Arguments: map[string]any{"pod": "logger", "namespace": namespace, "tail": 20},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("get_logs failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+		var r tools.Result
+		decode(t, res.StructuredContent, &r)
+		if strings.Contains(r.Output, "hunter2secret") || strings.Contains(r.Output, "AKIAIOSFODNN7EXAMPLE") {
+			t.Fatalf("secret survived redaction: %q", r.Output)
+		}
+		if !strings.Contains(r.Output, "redacted") {
+			t.Fatalf("expected redaction markers in logs: %q", r.Output)
+		}
+	})
+
+	t.Run("auth_can_i", func(t *testing.T) {
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "auth_can_i", Arguments: map[string]any{"verb": "get", "resource": "pods", "namespace": namespace},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("auth_can_i failed: %v isErr=%v", err, res != nil && res.IsError)
+		}
+		var a tools.AuthCanIOutput
+		decode(t, res.StructuredContent, &a)
+		// kind's default context is cluster-admin, so this must be allowed.
+		if !a.Allowed || a.Answer != "yes" {
+			t.Fatalf("expected allowed=yes, got %+v", a)
+		}
+	})
 }
 
 // --- helpers ---
@@ -166,6 +199,20 @@ func waitForWaitingReason(t *testing.T, pod string, reasons ...string) {
 		time.Sleep(3 * time.Second)
 	}
 	t.Fatalf("pod %s never reached waiting reason %v", pod, reasons)
+}
+
+// waitForPhase polls until the pod reaches the given .status.phase.
+func waitForPhase(t *testing.T, pod, phase string) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("kubectl", "get", "pod", pod, "-n", namespace, "-o=jsonpath={.status.phase}").Output()
+		if strings.TrimSpace(string(out)) == phase {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("pod %s never reached phase %s", pod, phase)
 }
 
 func diagnose(t *testing.T, ctx context.Context, s *mcp.ClientSession, name string, args map[string]any) tools.DiagnoseOutput {

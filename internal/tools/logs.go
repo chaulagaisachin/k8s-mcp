@@ -55,6 +55,10 @@ func registerLogs(s *mcp.Server, d *Deps) {
 			}
 			args = append(args, "--since="+in.Since)
 		}
-		return d.run(ctx, in.Context, args...)
+		out, err := d.Runner.Run(ctx, d.kctx(in.Context), args...)
+		if err != nil {
+			return nil, Result{}, err
+		}
+		return finalize(args, kube.RedactLog(out))
 	})
 }

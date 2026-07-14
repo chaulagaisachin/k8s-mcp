@@ -27,6 +27,7 @@ var allowedVerbs = map[string]bool{
 	"cluster-info":  true,
 	"rollout":       true,
 	"config":        true,
+	"auth":          true,
 }
 
 // allowedRolloutSub restricts `rollout` to its non-mutating subcommands.
@@ -39,14 +40,18 @@ var allowedConfigSub = map[string]bool{
 	"view":            true,
 }
 
+// allowedAuthSub restricts `auth` to the read-only permission query.
+var allowedAuthSub = map[string]bool{"can-i": true}
+
 // Runner executes kubectl with a fixed argv (never a shell string).
 type Runner struct {
 	Bin     string
 	Timeout time.Duration
+	audit   *auditor
 }
 
 // NewRunner builds a Runner from the environment (K8S_MCP_KUBECTL,
-// K8S_MCP_TIMEOUT_SECONDS).
+// K8S_MCP_TIMEOUT_SECONDS, and the K8S_MCP_AUDIT* variables).
 func NewRunner() *Runner {
 	bin := os.Getenv("K8S_MCP_KUBECTL")
 	if bin == "" {
@@ -58,33 +63,44 @@ func NewRunner() *Runner {
 			timeout = time.Duration(n) * time.Second
 		}
 	}
-	return &Runner{Bin: bin, Timeout: timeout}
+	return &Runner{Bin: bin, Timeout: timeout, audit: newAuditor()}
 }
 
-// Run executes a read-only kubectl command. kctx, when non-empty, is injected as
-// --context (except for `config`, which reads the kubeconfig directly). It
-// returns kubectl's stdout, or an error carrying kubectl's stderr.
-func (r *Runner) Run(ctx context.Context, kctx string, args ...string) (string, error) {
+// validate enforces the read-only verb/subcommand allowlist.
+func validate(args []string) error {
 	if len(args) == 0 {
-		return "", errors.New("no kubectl command given")
+		return errors.New("no kubectl command given")
 	}
 	verb := args[0]
 	if !allowedVerbs[verb] {
-		return "", fmt.Errorf("verb %q is not permitted (this server is read-only)", verb)
+		return fmt.Errorf("verb %q is not permitted (this server is read-only)", verb)
 	}
-	if verb == "rollout" {
+	switch verb {
+	case "rollout":
 		if len(args) < 2 || !allowedRolloutSub[args[1]] {
-			return "", errors.New("only 'rollout status' and 'rollout history' are permitted")
+			return errors.New("only 'rollout status' and 'rollout history' are permitted")
+		}
+	case "config":
+		if len(args) < 2 || !allowedConfigSub[args[1]] {
+			return errors.New("only read-only 'config' subcommands are permitted")
+		}
+	case "auth":
+		if len(args) < 2 || !allowedAuthSub[args[1]] {
+			return errors.New("only 'auth can-i' is permitted")
 		}
 	}
-	if verb == "config" {
-		if len(args) < 2 || !allowedConfigSub[args[1]] {
-			return "", errors.New("only read-only 'config' subcommands are permitted")
-		}
+	return nil
+}
+
+// exec validates, runs kubectl with a per-call timeout, audits the invocation,
+// and returns raw stdout/stderr plus the run error (without interpreting it).
+func (r *Runner) exec(ctx context.Context, kctx string, args []string) (stdout, stderr string, timedOut bool, err error) {
+	if verr := validate(args); verr != nil {
+		return "", "", false, verr
 	}
 
 	full := append([]string{}, args...)
-	if kctx != "" && verb != "config" {
+	if kctx != "" && args[0] != "config" {
 		full = append(full, "--context", kctx)
 	}
 
@@ -92,21 +108,73 @@ func (r *Runner) Run(ctx context.Context, kctx string, args ...string) (string, 
 	defer cancel()
 
 	cmd := exec.CommandContext(tctx, r.Bin, full...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
 
-	err := cmd.Run()
+	start := time.Now()
+	runErr := cmd.Run()
+	dur := time.Since(start)
+	timedOut = tctx.Err() == context.DeadlineExceeded
+
+	r.audit.log(auditEntry{
+		TS:         time.Now().UTC().Format(time.RFC3339),
+		Verb:       args[0],
+		Args:       full,
+		Context:    kctx,
+		DurationMS: dur.Milliseconds(),
+		OK:         runErr == nil,
+		Error:      errString(runErr),
+	})
+
+	return outBuf.String(), errBuf.String(), timedOut, runErr
+}
+
+// Run executes a read-only kubectl command. kctx, when non-empty, is injected as
+// --context (except for `config`). It returns stdout, or an error carrying
+// kubectl's stderr. A non-zero exit is treated as an error.
+func (r *Runner) Run(ctx context.Context, kctx string, args ...string) (string, error) {
+	stdout, stderr, timedOut, err := r.exec(ctx, kctx, args)
 	if err != nil {
-		if tctx.Err() == context.DeadlineExceeded {
+		if timedOut {
 			return "", fmt.Errorf("kubectl timed out after %s", r.Timeout)
 		}
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		if msg := strings.TrimSpace(stderr); msg != "" {
 			return "", errors.New(msg)
 		}
 		return "", err
 	}
-	return stdout.String(), nil
+	return stdout, nil
+}
+
+// RunAllowNonZero runs kubectl but does NOT treat a non-zero exit as an error —
+// it returns stdout and ok=false instead. This is for commands like
+// `auth can-i` that signal their answer via the exit code ("no" => exit 1).
+// Only failure-to-start and timeouts return an error.
+func (r *Runner) RunAllowNonZero(ctx context.Context, kctx string, args ...string) (out string, ok bool, err error) {
+	stdout, stderr, timedOut, exErr := r.exec(ctx, kctx, args)
+	if timedOut {
+		return "", false, fmt.Errorf("kubectl timed out after %s", r.Timeout)
+	}
+	if exErr != nil {
+		var exit *exec.ExitError
+		if errors.As(exErr, &exit) {
+			answer := strings.TrimSpace(stdout)
+			if answer == "" {
+				answer = strings.TrimSpace(stderr)
+			}
+			return answer, false, nil
+		}
+		return "", false, exErr // validation or failed-to-start
+	}
+	return strings.TrimSpace(stdout), true, nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // SafeArg validates a user-supplied argv value (resource type, name, namespace,

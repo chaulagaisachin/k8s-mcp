@@ -247,7 +247,8 @@ func (d *Deps) podEvidence(ctx context.Context, kctx, pod string, nsArgs []strin
 	if prev, err := d.Runner.Run(ctx, d.kctx(kctx), append(logArgs, "--previous")...); err == nil && strings.TrimSpace(prev) != "" {
 		b.WriteString("# logs (previous)\n" + prev + "\n")
 	}
-	capped, _ := kube.Cap(b.String())
+	// Evidence includes describe (env values) and raw logs — scrub secrets.
+	capped, _ := kube.Cap(kube.RedactLog(b.String()))
 	return capped
 }
 
