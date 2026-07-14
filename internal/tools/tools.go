@@ -21,6 +21,7 @@ type Result struct {
 	Command   string `json:"command" jsonschema:"the kubectl command that was executed"`
 	Output    string `json:"output" jsonschema:"the command output"`
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"true if the output was capped"`
+	Warning   string `json:"warning,omitempty" jsonschema:"impact warning for a mutating operation — relay this to the user"`
 }
 
 // addTool registers a tool, stamping ReadOnlyHint on it. Every tool in this
@@ -77,14 +78,16 @@ func (d *Deps) run(ctx context.Context, override string, args ...string) (*mcp.C
 	return finalize(args, out)
 }
 
-// runWrite executes a mutating kubectl command (gated by the runner) and packages
-// the capped result.
-func (d *Deps) runWrite(ctx context.Context, override string, args ...string) (*mcp.CallToolResult, Result, error) {
+// runWrite executes a mutating kubectl command (gated by the runner), packages
+// the capped result, and attaches an impact warning for the caller to relay.
+func (d *Deps) runWrite(ctx context.Context, override, warning string, args ...string) (*mcp.CallToolResult, Result, error) {
 	out, err := d.Runner.RunWrite(ctx, d.kctx(override), args...)
 	if err != nil {
 		return nil, Result{}, err
 	}
-	return finalize(args, out)
+	_, r, _ := finalize(args, out)
+	r.Warning = warning
+	return nil, r, nil
 }
 
 // finalize caps the output and builds the Result. Returning a nil

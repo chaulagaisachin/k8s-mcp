@@ -175,6 +175,11 @@ func TestE2E(t *testing.T) {
 		if err != nil || res.IsError {
 			t.Fatalf("scale failed: %v isErr=%v", err, res != nil && res.IsError)
 		}
+		var r tools.Result
+		decode(t, res.StructuredContent, &r)
+		if !strings.Contains(r.Warning, "IMPACT") {
+			t.Fatalf("expected an impact warning in the result, got %q", r.Warning)
+		}
 		waitForReplicas(t, "healthy-web", "2")
 	})
 
